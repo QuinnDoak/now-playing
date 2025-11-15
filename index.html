@@ -304,11 +304,10 @@
 
   <script>
     // ====== CONFIG ======
-    const LASTFM_API_KEY = "a25a33028d5aefbbae3369a9ac379768";
+ 	const LASTFM_API_KEY = "a25a33028d5aefbbae3369a9ac379768";
     const LASTFM_USER = "cQloud";
     const YT_API_KEY = "AIzaSyD4G0Tu4eRl9938w74fW7hiyIci2TaIOAI";
 
-    // poll interval (ms)
     const POLL_MS = 15000;
 
     // ====== DOM HANDLES ======
@@ -324,113 +323,212 @@
     const artworkBg = document.getElementById("artwork-bg");
     const artworkSquare = document.getElementById("artwork-square");
 
-    // remember last track to avoid reloading the same video
+    // remember last track so we don't reload the same video
     let lastTrackKey = null;
 
     lastfmLink.href = "https://www.last.fm/user/" + encodeURIComponent(LASTFM_USER);
 
-async function fetchYouTubeVideo({ artist, title, isNowPlaying }) {
-  try {
-    const baseQuery = `${artist} - ${title}`;
+    async function fetchCurrentTrack() {
+      try {
+        infoMessage.textContent = "";
+        const url =
+          "https://ws.audioscrobbler.com/2.0/?" +
+          new URLSearchParams({
+            method: "user.getrecenttracks",
+            user: LASTFM_USER,
+            api_key: LASTFM_API_KEY,
+            format: "json",
+            limit: "1"
+          }).toString();
 
-    async function searchAndPick(query, strict) {
-      const url =
-        "https://www.googleapis.com/youtube/v3/search?" +
-        new URLSearchParams({
-          part: "snippet",
-          type: "video",
-          maxResults: "5",
-          q: query,
-          key: YT_API_KEY,
-          videoEmbeddable: "true"
-        }).toString();
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Last.fm request failed: " + res.status);
+        const data = await res.json();
 
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("YouTube request failed: " + res.status);
-      const data = await res.json();
-      if (!data.items || data.items.length === 0) return null;
-
-      // strict mode: use scoring to prefer official MV
-      if (strict) {
-        const lowerArtist = artist.toLowerCase();
-        const lowerTitle = title.toLowerCase();
-
-        const badWords = ["lyrics", "amv", "nightcore", "sped", "slowed", "edit", "8d"];
-        const goodWords = ["official", "music video", "mv"];
-
-        function score(item) {
-          const t = item.snippet.title.toLowerCase();
-          const ch = item.snippet.channelTitle.toLowerCase();
-          let s = 0;
-
-          if (t.includes(lowerArtist)) s += 2;
-          if (t.includes(lowerTitle)) s += 2;
-
-          for (const w of goodWords) if (t.includes(w)) s += 3;
-          for (const w of badWords) if (t.includes(w)) s -= 4;
-
-          if (ch.includes(lowerArtist)) s += 2;
-          if (ch.includes("vevo") || ch.includes("official")) s += 2;
-
-          return s;
+        const tracks = data.recenttracks && data.recenttracks.track;
+        if (!tracks || tracks.length === 0) {
+          setEmptyState();
+          return;
         }
 
-        let best = data.items[0];
-        let bestScore = score(best);
+        const track = Array.isArray(tracks) ? tracks[0] : tracks;
 
-        for (const item of data.items.slice(1)) {
-          const s = score(item);
-          if (s > bestScore) {
-            bestScore = s;
-            best = item;
-          }
+        const isNowPlaying =
+          track["@attr"] && track["@attr"].nowplaying === "true";
+
+        const artist =
+          (track.artist && track.artist["#text"]) || "Unknown artist";
+        const title = track.name || "Unknown title";
+        const album =
+          track.album && track.album["#text"] ? track.album["#text"] : "";
+
+        const imageArray = track.image || [];
+        const largeImage =
+          imageArray.length > 0
+            ? imageArray[imageArray.length - 1]["#text"]
+            : "";
+
+        const trackKey = artist + " - " + title;
+        const trackChanged = trackKey !== lastTrackKey;
+        lastTrackKey = trackKey;
+
+        updateTrackUI({ artist, title, album, largeImage, isNowPlaying });
+
+        if (trackChanged) {
+          await fetchYouTubeVideo({ artist, title, isNowPlaying });
         }
+      } catch (e) {
+        console.error(e);
+        infoMessage.textContent =
+          "Could not load data from Last.fm. Check API key, username, or CORS.";
+        setErrorState();
+      }
+    }
 
-        return { item: best, score: bestScore };
+    function updateTrackUI({ artist, title, album, largeImage, isNowPlaying }) {
+      titleEl.textContent = title;
+      artistEl.textContent = artist;
+      albumEl.textContent = album ? "on " + album : "";
+
+      if (largeImage) {
+        artworkBg.style.backgroundImage = "url('" + largeImage + "')";
+        artworkSquare.style.backgroundImage = "url('" + largeImage + "')";
+      } else {
+        artworkBg.style.backgroundImage =
+          "radial-gradient(circle at 20% 20%, #4b5563, #020617)";
+        artworkSquare.style.backgroundImage =
+          "radial-gradient(circle at 20% 20%, #4b5563, #020617)";
       }
 
-      // non-strict: just take the first result as a generic audio/video
-      return { item: data.items[0], score: 0 };
+      if (isNowPlaying) {
+        statusText.textContent = "Now playing";
+        statusDot.classList.remove("paused");
+        visualizer.classList.remove("paused");
+      } else {
+        statusText.textContent = "Last scrobbled";
+        statusDot.classList.add("paused");
+        visualizer.classList.add("paused");
+      }
     }
 
-    // 1) strict search for official MV
-    let picked = await searchAndPick(baseQuery + " official music video", true);
-
-    // if strict search fails or looks very bad, 2) loose fallback search
-    if (!picked || picked.score < 0) {
-      const fallback = await searchAndPick(baseQuery, false);
-      if (fallback) picked = fallback;
-    }
-
-    if (!picked) {
-      infoMessage.textContent = "No video found on YouTube for this track.";
+    function setEmptyState() {
+      titleEl.textContent = "Nothing here yet";
+      artistEl.textContent = "No scrobbles available";
+      albumEl.textContent = "";
+      statusText.textContent = "Offline";
+      statusDot.classList.add("paused");
+      visualizer.classList.add("paused");
+      infoMessage.textContent = "Start playing something on a connected service.";
       videoFrame.src = "";
-      return;
     }
 
-    const videoId = picked.item.id.videoId;
-    const autoplay = isNowPlaying ? "1" : "0";
+    function setErrorState() {
+      statusText.textContent = "Error";
+      statusDot.classList.add("paused");
+      visualizer.classList.add("paused");
+      videoFrame.src = "";
+    }
 
-    videoFrame.src =
-      "https://www.youtube.com/embed/" +
-      videoId +
-      "?autoplay=" +
-      autoplay +
-      "&mute=1&rel=0";
-    infoMessage.textContent = "";
-  } catch (e) {
-    console.error(e);
-    infoMessage.textContent =
-      "Could not load video from YouTube. Check API key or quota.";
-    videoFrame.src = "";
-  }
-}
+    // improved + fallback YouTube search
 
+    async function fetchYouTubeVideo({ artist, title, isNowPlaying }) {
+      try {
+        const baseQuery = `${artist} - ${title}`;
 
+        async function searchAndPick(query, strict) {
+          const url =
+            "https://www.googleapis.com/youtube/v3/search?" +
+            new URLSearchParams({
+              part: "snippet",
+              type: "video",
+              maxResults: "5",
+              q: query,
+              key: YT_API_KEY,
+              videoEmbeddable: "true"
+            }).toString();
+
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("YouTube request failed: " + res.status);
+          const data = await res.json();
+          if (!data.items || data.items.length === 0) return null;
+
+          if (strict) {
+            const lowerArtist = artist.toLowerCase();
+            const lowerTitle = title.toLowerCase();
+
+            const badWords = ["lyrics", "amv", "nightcore", "sped", "slowed", "edit", "8d"];
+            const goodWords = ["official", "music video", "mv"];
+
+            function score(item) {
+              const t = item.snippet.title.toLowerCase();
+              const ch = item.snippet.channelTitle.toLowerCase();
+              let s = 0;
+
+              if (t.includes(lowerArtist)) s += 2;
+              if (t.includes(lowerTitle)) s += 2;
+
+              for (const w of goodWords) if (t.includes(w)) s += 3;
+              for (const w of badWords) if (t.includes(w)) s -= 4;
+
+              if (ch.includes(lowerArtist)) s += 2;
+              if (ch.includes("vevo") || ch.includes("official")) s += 2;
+
+              return s;
+            }
+
+            let best = data.items[0];
+            let bestScore = score(best);
+
+            for (const item of data.items.slice(1)) {
+              const s = score(item);
+              if (s > bestScore) {
+                bestScore = s;
+                best = item;
+              }
+            }
+
+            return { item: best, score: bestScore };
+          }
+
+          // non-strict: just take the first result
+          return { item: data.items[0], score: 0 };
+        }
+
+        // strict search for official MV
+        let picked = await searchAndPick(baseQuery + " official music video", true);
+
+        // if nothing good, fallback to any video for the track
+        if (!picked || picked.score < 0) {
+          const fallback = await searchAndPick(baseQuery, false);
+          if (fallback) picked = fallback;
+        }
+
+        if (!picked) {
+          infoMessage.textContent = "No video found on YouTube for this track.";
+          videoFrame.src = "";
+          return;
+        }
+
+        const videoId = picked.item.id.videoId;
+        const autoplay = isNowPlaying ? "1" : "0";
+
+        videoFrame.src =
+          "https://www.youtube.com/embed/" +
+          videoId +
+          "?autoplay=" +
+          autoplay +
+          "&mute=1&rel=0";
+        infoMessage.textContent = "";
+      } catch (e) {
+        console.error(e);
+        infoMessage.textContent =
+          "Could not load video from YouTube. Check API key or quota.";
+        videoFrame.src = "";
+      }
+    }
 
     fetchCurrentTrack();
     setInterval(fetchCurrentTrack, POLL_MS);
   </script>
 </body>
 </html>
-
