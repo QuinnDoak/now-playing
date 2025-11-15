@@ -308,6 +308,7 @@
     const LASTFM_USER = "cQloud";
     const YT_API_KEY = "AIzaSyD4G0Tu4eRl9938w74fW7hiyIci2TaIOAI";
 
+    // poll interval (ms)
     const POLL_MS = 15000;
 
     // ====== DOM HANDLES ======
@@ -322,6 +323,9 @@
     const videoFrame = document.getElementById("video-frame");
     const artworkBg = document.getElementById("artwork-bg");
     const artworkSquare = document.getElementById("artwork-square");
+
+    // remember last track to avoid reloading the same video
+    let lastTrackKey = null;
 
     lastfmLink.href = "https://www.last.fm/user/" + encodeURIComponent(LASTFM_USER);
 
@@ -365,8 +369,15 @@
             ? imageArray[imageArray.length - 1]["#text"]
             : "";
 
+        const trackKey = artist + " - " + title;
+        const trackChanged = trackKey !== lastTrackKey;
+        lastTrackKey = trackKey;
+
         updateTrackUI({ artist, title, album, largeImage, isNowPlaying });
-        await fetchYouTubeVideo({ artist, title, isNowPlaying });
+
+        if (trackChanged) {
+          await fetchYouTubeVideo({ artist, title, isNowPlaying });
+        }
       } catch (e) {
         console.error(e);
         infoMessage.textContent =
