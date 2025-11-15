@@ -431,104 +431,51 @@
 
     // improved + fallback YouTube search
 
-    async function fetchYouTubeVideo({ artist, title, isNowPlaying }) {
-      try {
-        const baseQuery = `${artist} - ${title}`;
+async function fetchYouTubeVideo({ artist, title, isNowPlaying }) {
+  try {
+    const query = artist + " - " + title + " official music video";
+    const url =
+      "https://www.googleapis.com/youtube/v3/search?" +
+      new URLSearchParams({
+        part: "snippet",
+        type: "video",
+        maxResults: "1",
+        q: query,
+        key: YT_API_KEY
+      }).toString();
 
-        async function searchAndPick(query, strict) {
-          const url =
-            "https://www.googleapis.com/youtube/v3/search?" +
-            new URLSearchParams({
-              part: "snippet",
-              type: "video",
-              maxResults: "5",
-              q: query,
-              key: YT_API_KEY,
-              videoEmbeddable: "true"
-            }).toString();
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("YouTube request failed: " + res.status);
+    const data = await res.json();
 
-          const res = await fetch(url);
-          if (!res.ok) throw new Error("YouTube request failed: " + res.status);
-          const data = await res.json();
-          if (!data.items || data.items.length === 0) return null;
-
-          if (strict) {
-            const lowerArtist = artist.toLowerCase();
-            const lowerTitle = title.toLowerCase();
-
-            const badWords = ["lyrics", "amv", "nightcore", "sped", "slowed", "edit", "8d"];
-            const goodWords = ["official", "music video", "mv"];
-
-            function score(item) {
-              const t = item.snippet.title.toLowerCase();
-              const ch = item.snippet.channelTitle.toLowerCase();
-              let s = 0;
-
-              if (t.includes(lowerArtist)) s += 2;
-              if (t.includes(lowerTitle)) s += 2;
-
-              for (const w of goodWords) if (t.includes(w)) s += 3;
-              for (const w of badWords) if (t.includes(w)) s -= 4;
-
-              if (ch.includes(lowerArtist)) s += 2;
-              if (ch.includes("vevo") || ch.includes("official")) s += 2;
-
-              return s;
-            }
-
-            let best = data.items[0];
-            let bestScore = score(best);
-
-            for (const item of data.items.slice(1)) {
-              const s = score(item);
-              if (s > bestScore) {
-                bestScore = s;
-                best = item;
-              }
-            }
-
-            return { item: best, score: bestScore };
-          }
-
-          // non-strict: just take the first result
-          return { item: data.items[0], score: 0 };
-        }
-
-        // strict search for official MV
-        let picked = await searchAndPick(baseQuery + " official music video", true);
-
-        // if nothing good, fallback to any video for the track
-        if (!picked || picked.score < 0) {
-          const fallback = await searchAndPick(baseQuery, false);
-          if (fallback) picked = fallback;
-        }
-
-        if (!picked) {
-          infoMessage.textContent = "No video found on YouTube for this track.";
-          videoFrame.src = "";
-          return;
-        }
-
-        const videoId = picked.item.id.videoId;
-        const autoplay = isNowPlaying ? "1" : "0";
-
-        videoFrame.src =
-          "https://www.youtube.com/embed/" +
-          videoId +
-          "?autoplay=" +
-          autoplay +
-          "&mute=1&rel=0";
-        infoMessage.textContent = "";
-      } catch (e) {
-        console.error(e);
-        infoMessage.textContent =
-          "Could not load video from YouTube. Check API key or quota.";
-        videoFrame.src = "";
-      }
+    if (!data.items || data.items.length === 0) {
+      infoMessage.textContent = "No matching music video found on YouTube.";
+      videoFrame.src = "";
+      return;
     }
+
+    const videoId = data.items[0].id.videoId;
+    const autoplay = isNowPlaying ? "1" : "0";
+
+    videoFrame.src =
+      "https://www.youtube.com/embed/" +
+      videoId +
+      "?autoplay=" +
+      autoplay +
+      "&mute=1&rel=0";
+    infoMessage.textContent = "";
+  } catch (e) {
+    console.error(e);
+    infoMessage.textContent =
+      "Could not load video from YouTube. Check API key or quota.";
+    videoFrame.src = "";
+  }
+}
+
 
     fetchCurrentTrack();
     setInterval(fetchCurrentTrack, POLL_MS);
   </script>
 </body>
 </html>
+
