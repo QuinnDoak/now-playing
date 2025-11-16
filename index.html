@@ -245,6 +245,7 @@
 <body>
   <div class="wrapper">
     <div class="player-card">
+      <!-- LEFT: Artwork + Track Meta -->
       <div class="artwork-shell">
         <div id="artwork-bg" class="artwork-bg"></div>
         <div class="artwork-foreground">
@@ -252,6 +253,7 @@
         </div>
       </div>
 
+      <!-- RIGHT: Text + Visualizer + Video -->
       <div class="meta">
         <div class="pill-row">
           <div class="pill-row">
@@ -306,6 +308,7 @@
     const LASTFM_USER = "cQloud";
     const YT_API_KEY = "AIzaSyAHhbjnoTVTVBjavcpS5MUhJxNqHEwRUxQ";
 
+    // poll interval (ms)
     const POLL_MS = 15000;
 
     // ====== DOM HANDLES ======
@@ -321,6 +324,7 @@
     const artworkBg = document.getElementById("artwork-bg");
     const artworkSquare = document.getElementById("artwork-square");
 
+    // remember last track to avoid reloading the same video
     let lastTrackKey = null;
 
     lastfmLink.href = "https://www.last.fm/user/" + encodeURIComponent(LASTFM_USER);
