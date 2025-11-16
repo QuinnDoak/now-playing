@@ -240,6 +240,57 @@
       color: #9ca3c7;
       margin-top: 4px;
     }
+
+    /* ==== history (last 5 tracks) ==== */
+    .history {
+      margin-top: 10px;
+    }
+
+    .history-label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #9ca3c7;
+      margin-bottom: 4px;
+    }
+
+    .history-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+
+    .history-item {
+      font-size: 13px;
+      color: #e5e7eb;
+      opacity: 0.9;
+      padding: 3px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    }
+
+    .history-item:last-child {
+      border-bottom: none;
+    }
+
+    .history-main {
+      font-weight: 500;
+    }
+
+    .history-sub {
+      font-size: 11px;
+      color: #9ca3c7;
+    }
+
+    .history-empty {
+      font-size: 12px;
+      color: #9ca3c7;
+      opacity: 0.8;
+    }
   </style>
 </head>
 <body>
@@ -253,7 +304,7 @@
         </div>
       </div>
 
-      <!-- RIGHT: Text + Visualizer + Video -->
+      <!-- RIGHT: Text + Visualizer + Video + History -->
       <div class="meta">
         <div class="pill-row">
           <div class="pill-row">
@@ -298,6 +349,11 @@
 
           <div id="info-message" class="loading"></div>
         </div>
+
+        <div class="history">
+          <div class="history-label">Recently played</div>
+          <ul id="history-list" class="history-list"></ul>
+        </div>
       </div>
     </div>
   </div>
@@ -323,6 +379,7 @@
     const videoFrame = document.getElementById("video-frame");
     const artworkBg = document.getElementById("artwork-bg");
     const artworkSquare = document.getElementById("artwork-square");
+    const historyList = document.getElementById("history-list");
 
     // remember last track to avoid reloading the same video
     let lastTrackKey = null;
@@ -339,20 +396,23 @@
             user: LASTFM_USER,
             api_key: LASTFM_API_KEY,
             format: "json",
-            limit: "1"
+            limit: "6" // current + previous 5
           }).toString();
 
         const res = await fetch(url);
         if (!res.ok) throw new Error("Last.fm request failed: " + res.status);
         const data = await res.json();
 
-        const tracks = data.recenttracks && data.recenttracks.track;
-        if (!tracks || tracks.length === 0) {
+        const tracksRaw = data.recenttracks && data.recenttracks.track;
+        if (!tracksRaw || tracksRaw.length === 0) {
           setEmptyState();
+          updateHistory([]);
           return;
         }
 
-        const track = Array.isArray(tracks) ? tracks[0] : tracks;
+        const list = Array.isArray(tracksRaw) ? tracksRaw : [tracksRaw];
+        const track = list[0];
+        const history = list.slice(1, 6); // last 5
 
         const isNowPlaying =
           track["@attr"] && track["@attr"].nowplaying === "true";
@@ -374,6 +434,7 @@
         lastTrackKey = trackKey;
 
         updateTrackUI({ artist, title, album, largeImage, isNowPlaying });
+        updateHistory(history);
 
         if (trackChanged) {
           await fetchYouTubeVideo({ artist, title, isNowPlaying });
@@ -383,6 +444,7 @@
         infoMessage.textContent =
           "Could not load data from Last.fm. Check API key, username, or CORS.";
         setErrorState();
+        updateHistory([]);
       }
     }
 
@@ -410,6 +472,33 @@
         statusDot.classList.add("paused");
         visualizer.classList.add("paused");
       }
+    }
+
+    function updateHistory(historyTracks) {
+      if (!historyTracks || historyTracks.length === 0) {
+        historyList.innerHTML =
+          '<li class="history-empty">No recent tracks yet.</li>';
+        return;
+      }
+
+      const itemsHtml = historyTracks.map(function (t) {
+        const artist =
+          (t.artist && t.artist["#text"]) || "Unknown artist";
+        const title = t.name || "Unknown title";
+        const album =
+          t.album && t.album["#text"] ? t.album["#text"] : "";
+
+        const sub = album ? artist + " • " + album : artist;
+
+        return (
+          '<li class="history-item">' +
+            '<div class="history-main">' + title + "</div>" +
+            '<div class="history-sub">' + sub + "</div>" +
+          "</li>"
+        );
+      });
+
+      historyList.innerHTML = itemsHtml.join("");
     }
 
     function setEmptyState() {
@@ -476,5 +565,3 @@
   </script>
 </body>
 </html>
-
-
