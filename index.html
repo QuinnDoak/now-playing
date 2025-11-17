@@ -201,6 +201,7 @@
       justify-content: space-between;
       align-items: baseline;
       gap: 12px;
+      flex-wrap: wrap;
     }
 
     .video-label {
@@ -241,7 +242,7 @@
       margin-top: 4px;
     }
 
-    /* ==== history (last 5 tracks) ==== */
+    /* history (last 5 tracks) */
     .history {
       margin-top: 10px;
     }
@@ -291,6 +292,28 @@
       color: #9ca3c7;
       opacity: 0.8;
     }
+
+    /* load button */
+    .load-video-btn {
+      border: none;
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(59, 130, 246, 0.2);
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+
+    .load-video-btn:hover {
+      background: rgba(59, 130, 246, 0.35);
+    }
+
+    .load-video-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
   </style>
 </head>
 <body>
@@ -332,8 +355,13 @@
         <div class="video-shell">
           <div class="video-label-row">
             <div class="video-label">Music video</div>
-            <div id="video-note" class="video-note">
-              Pulling from YouTube based on artist + track title
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <button id="load-video-btn" class="load-video-btn" type="button">
+                Load music video
+              </button>
+              <div id="video-note" class="video-note">
+                Uses cache, only searches YouTube when needed
+              </div>
             </div>
           </div>
 
@@ -365,7 +393,7 @@
     const YT_API_KEY = "AIzaSyDAtYhI97gkenc0e1RZDVmV8qQEh4sdi38";
 
     // poll interval (ms)
-    const POLL_MS = 15000;
+    const POLL_MS = 60000; // slower to reduce API spam
 
     // ====== DOM HANDLES ======
     const statusText = document.getElementById("status-text");
@@ -380,15 +408,39 @@
     const artworkBg = document.getElementById("artwork-bg");
     const artworkSquare = document.getElementById("artwork-square");
     const historyList = document.getElementById("history-list");
+    const loadVideoBtn = document.getElementById("load-video-btn");
 
-    // remember last track to avoid reloading the same video
+    // ====== STATE ======
     let lastTrackKey = null;
+    let currentTrackMeta = null; // { artist, title, album, isNowPlaying }
+
+    // cache for track -> videoId
+    let videoCache = {};
+    try {
+      videoCache = JSON.parse(localStorage.getItem("ytVideoCache") || "{}");
+    } catch (_) {
+      videoCache = {};
+    }
+
+    function saveCache() {
+      try {
+        localStorage.setItem("ytVideoCache", JSON.stringify(videoCache));
+      } catch (_) {
+        // ignore storage errors
+      }
+    }
+
+    function trackCacheKey(artist, title) {
+      return (artist + " - " + title).toLowerCase();
+    }
 
     lastfmLink.href = "https://www.last.fm/user/" + encodeURIComponent(LASTFM_USER);
 
     async function fetchCurrentTrack() {
       try {
         infoMessage.textContent = "";
+        loadVideoBtn.disabled = false;
+
         const url =
           "https://ws.audioscrobbler.com/2.0/?" +
           new URLSearchParams({
@@ -407,6 +459,7 @@
         if (!tracksRaw || tracksRaw.length === 0) {
           setEmptyState();
           updateHistory([]);
+          currentTrackMeta = null;
           return;
         }
 
@@ -433,11 +486,16 @@
         const trackChanged = trackKey !== lastTrackKey;
         lastTrackKey = trackKey;
 
+        currentTrackMeta = { artist, title, album, isNowPlaying };
+
         updateTrackUI({ artist, title, album, largeImage, isNowPlaying });
         updateHistory(history);
 
+        // no automatic YouTube call here – user presses the button
         if (trackChanged) {
-          await fetchYouTubeVideo({ artist, title, isNowPlaying });
+          infoMessage.textContent = "Track changed. Press 'Load music video' if you want the video.";
+          // optionally clear video on track change if you want:
+          // videoFrame.src = "";
         }
       } catch (e) {
         console.error(e);
@@ -445,6 +503,8 @@
           "Could not load data from Last.fm. Check API key, username, or CORS.";
         setErrorState();
         updateHistory([]);
+        loadVideoBtn.disabled = true;
+        currentTrackMeta = null;
       }
     }
 
@@ -519,7 +579,33 @@
       videoFrame.src = "";
     }
 
-    async function fetchYouTubeVideo({ artist, title, isNowPlaying }) {
+    function setVideoSrc(videoId, isNowPlaying) {
+      const autoplay = isNowPlaying ? "1" : "0";
+      videoFrame.src =
+        "https://www.youtube.com/embed/" +
+        videoId +
+        "?autoplay=" +
+        autoplay +
+        "&mute=1&rel=0";
+    }
+
+    async function fetchYouTubeVideoWithCache({ artist, title, isNowPlaying }) {
+      if (!YT_API_KEY || YT_API_KEY === "YOUR_YOUTUBE_API_KEY") {
+        infoMessage.textContent = "YouTube API key missing.";
+        return;
+      }
+
+      const key = trackCacheKey(artist, title);
+
+      // cache hit
+      if (videoCache[key]) {
+        setVideoSrc(videoCache[key], isNowPlaying);
+        infoMessage.textContent = "Loaded video from cache.";
+        return;
+      }
+
+      infoMessage.textContent = "Searching YouTube for music video…";
+
       try {
         const query = artist + " - " + title + " official music video";
         const url =
@@ -543,15 +629,11 @@
         }
 
         const videoId = data.items[0].id.videoId;
-        const autoplay = isNowPlaying ? "1" : "0";
+        videoCache[key] = videoId;
+        saveCache();
 
-        videoFrame.src =
-          "https://www.youtube.com/embed/" +
-          videoId +
-          "?autoplay=" +
-          autoplay +
-          "&mute=1&rel=0";
-        infoMessage.textContent = "";
+        setVideoSrc(videoId, isNowPlaying);
+        infoMessage.textContent = "Video loaded from YouTube and cached.";
       } catch (e) {
         console.error(e);
         infoMessage.textContent =
@@ -559,6 +641,14 @@
         videoFrame.src = "";
       }
     }
+
+    loadVideoBtn.addEventListener("click", function () {
+      if (!currentTrackMeta) {
+        infoMessage.textContent = "No track loaded yet.";
+        return;
+      }
+      fetchYouTubeVideoWithCache(currentTrackMeta);
+    });
 
     fetchCurrentTrack();
     setInterval(fetchCurrentTrack, POLL_MS);
